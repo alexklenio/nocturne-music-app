@@ -6,7 +6,7 @@ import type { Track } from "./db";
 import { downloadDriveAudio, isDriveConfigured, pickAudioFiles } from "./drive";
 
 type View = "all" | "favorites";
-type ImportMode = "local" | "link" | "drive";
+type ImportMode = "local" | "link" | "drive" | "youtube";
 
 const formatTime = (seconds: number) => {
   if (!Number.isFinite(seconds)) return "0:00";
@@ -27,6 +27,8 @@ export default function App() {
   const [importMode, setImportMode] = useState<ImportMode>("local");
   const [linkUrl, setLinkUrl] = useState("");
   const [linkTitle, setLinkTitle] = useState("");
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [youtubeEmbed, setYoutubeEmbed] = useState<{ url: string; kind: "video" | "playlist" } | null>(null);
   const [busy, setBusy] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -99,6 +101,29 @@ export default function App() {
     finally { setBusy(false); }
   }
 
+  function addYouTubeLink() {
+    const raw = youtubeUrl.trim();
+    let parsed: URL;
+    try { parsed = new URL(raw); } catch { setNotice("Cole um link válido do YouTube."); return; }
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "").replace(/^m\./, "");
+    if (!(["youtube.com", "music.youtube.com", "youtu.be", "youtube-nocookie.com"].includes(host) || host.endsWith(".youtube.com"))) {
+      setNotice("Esse link não parece ser do YouTube."); return;
+    }
+    const playlistId = parsed.searchParams.get("list");
+    const videoId = host === "youtu.be"
+      ? parsed.pathname.split("/").filter(Boolean)[0]
+      : parsed.searchParams.get("v") || parsed.pathname.match(/^\/(?:embed|shorts|live)\/([^/?]+)/)?.[1];
+    if (playlistId && /^[a-zA-Z0-9_-]+$/.test(playlistId)) {
+      setYoutubeEmbed({ url: `https://www.youtube-nocookie.com/embed/videoseries?list=${encodeURIComponent(playlistId)}&playsinline=1`, kind: "playlist" });
+    } else if (videoId && /^[a-zA-Z0-9_-]+$/.test(videoId)) {
+      setYoutubeEmbed({ url: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?playsinline=1`, kind: "video" });
+    } else {
+      setNotice("Não encontrei um vídeo ou uma playlist nesse link. Confira o endereço e tente novamente."); return;
+    }
+    setYoutubeUrl(""); setImportOpen(false); setPlaying(false);
+    setNotice(playlistId ? "Playlist do YouTube preparada para reprodução." : "Vídeo do YouTube preparado para reprodução.");
+  }
+
   async function importFromDrive() {
     setBusy(true);
     try {
@@ -158,6 +183,10 @@ export default function App() {
         <div className="hero-art" aria-hidden="true"><div className="art-glow"/><div className="vinyl"><div className="vinyl-grooves"/><div className="vinyl-label"><AudioLines size={31}/></div></div><div className="floating-note note-one">♪</div><div className="floating-note note-two">♫</div></div>
       </section>
       {notice && <div className="notice" role="status"><span>{notice}</span><button onClick={() => setNotice("")} aria-label="Fechar aviso">×</button></div>}
+      {youtubeEmbed && <section className="youtube-section">
+        <div className="youtube-heading"><div><span className="section-kicker">REPRODUÇÃO DO YOUTUBE</span><h2>{youtubeEmbed.kind === "playlist" ? "Sua playlist" : "Vídeo selecionado"}</h2><p>Use os controles oficiais do YouTube para reproduzir. Esta reprodução permanece no player incorporado.</p></div><button className="icon-button" onClick={() => setYoutubeEmbed(null)} aria-label="Fechar reprodução do YouTube"><X size={18}/></button></div>
+        <div className="youtube-frame-wrap"><iframe src={youtubeEmbed.url} title={youtubeEmbed.kind === "playlist" ? "Playlist do YouTube" : "Vídeo do YouTube"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /></div>
+      </section>}
       <section className="library-section">
         <div className="section-heading"><div><span className="section-kicker">A SUA BIBLIOTECA</span><h2>{view === "favorites" ? "Suas favoritas" : "Todas as músicas"} <span className="muted-count">{visibleTracks.length}</span></h2></div><label className="search-box"><Search size={17}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar música..." aria-label="Buscar música"/></label></div>
         {visibleTracks.length === 0 ? <div className="empty-state"><div className="empty-icon">{view === "favorites" ? <Heart size={25}/> : <Music2 size={25}/>}</div><h3>{view === "favorites" ? "Suas favoritas começam aqui" : tracks.length ? "Nada encontrado" : "Sua biblioteca está esperando"}</h3><p>{view === "favorites" ? "Toque no coração de uma música para guardá-la aqui." : tracks.length ? "Tente outro termo ou importe novas músicas." : "Importe arquivos do iPhone, do Google Drive ou adicione um link direto para áudio."}</p>{!tracks.length && <button className="subtle-button" onClick={() => setImportOpen(true)}><Plus size={16}/> Escolher fonte</button>}</div> :
@@ -181,9 +210,11 @@ export default function App() {
           <button className={importMode === "local" ? "active" : ""} onClick={() => setImportMode("local")}><Upload size={16}/> Arquivos</button>
           <button className={importMode === "drive" ? "active" : ""} onClick={() => setImportMode("drive")}><Cloud size={16}/> Google Drive</button>
           <button className={importMode === "link" ? "active" : ""} onClick={() => setImportMode("link")}><Link2 size={16}/> Link online</button>
+          <button className={importMode === "youtube" ? "active" : ""} onClick={() => setImportMode("youtube")}><Radio size={16}/> YouTube</button>
         </div>
         {importMode === "local" && <div className="import-pane"><div className="pane-icon"><Upload size={22}/></div><h3>Importar do dispositivo</h3><p>Escolha músicas no app Arquivos do iPhone ou no computador. Uma cópia será guardada para ouvir offline.</p><button className="modal-primary" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? "Importando…" : "Escolher arquivos de áudio"}</button></div>}
         {importMode === "drive" && <div className="import-pane"><div className="pane-icon"><Cloud size={22}/></div><h3>Importar do Google Drive</h3><p>Escolha os arquivos de áudio na sua conta Google. O Nocturne baixará uma cópia para a biblioteca local, para ouvir offline.</p>{!isDriveConfigured() && <div className="setup-note">Integração quase pronta: configure as credenciais do Google Cloud seguindo o README e o arquivo <code>.env.example</code>.</div>}<button className="modal-primary" disabled={busy} onClick={importFromDrive}>{busy ? "Conectando e importando…" : "Conectar e escolher no Drive"}</button><small className="modal-small">Permissão solicitada: acesso somente aos arquivos que você selecionar para o app.</small></div>}
+        {importMode === "youtube" && <div className="import-pane link-pane"><div className="pane-icon"><Radio size={22}/></div><h3>Adicionar link do YouTube</h3><p>Cole o link de um vídeo ou playlist. O Nocturne identifica o tipo e abre o player oficial para reprodução.</p><label>Link do vídeo ou playlist<input value={youtubeUrl} onChange={e => setYoutubeUrl(e.target.value)} placeholder="https://www.youtube.com/watch?v=…" inputMode="url" autoComplete="url" onKeyDown={e => { if (e.key === "Enter" && youtubeUrl.trim()) addYouTubeLink(); }}/></label><div className="setup-note">O YouTube será reproduzido no player incorporado. Não é possível extrair o áudio nem usar este modo como reprodução em segundo plano/controles de tela bloqueada. Para isso, use arquivos locais, Google Drive ou links diretos de áudio autorizados.</div><button className="modal-primary" disabled={!youtubeUrl.trim()} onClick={addYouTubeLink}>Preparar reprodução</button></div>}
         {importMode === "link" && <div className="import-pane link-pane"><div className="pane-icon"><Link2 size={22}/></div><h3>Reproduzir de um link</h3><p>Cole um endereço direto para um arquivo de áudio. Ele será salvo como fonte online, sem baixar uma cópia permanente.</p><label>Link do áudio<input value={linkUrl} onChange={e => setLinkUrl(e.target.value)} placeholder="https://site.com/minha-musica.mp3" inputMode="url" autoComplete="url"/></label><label>Nome da música (opcional)<input value={linkTitle} onChange={e => setLinkTitle(e.target.value)} placeholder="Nome da faixa"/></label><div className="setup-note">Links de páginas do YouTube, Spotify e páginas de compartilhamento do Drive geralmente não são arquivos de áudio diretos. O servidor precisa permitir acesso ao arquivo.</div><button className="modal-primary" disabled={busy || !linkUrl.trim()} onClick={importLink}>{busy ? "Adicionando…" : "Adicionar link online"}</button></div>}
       </section>
     </div>}
